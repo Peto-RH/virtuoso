@@ -1,0 +1,7 @@
+module github.com/pschrimp/virtuoso
+
+go 1.23
+
+require github.com/BurntSushi/toml v1.6.0
+
+require libvirt.org/go/libvirt v1.12003.0
