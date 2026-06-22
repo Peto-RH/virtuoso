@@ -1,0 +1,38 @@
+# This file is part of virtuoso.
+#
+# This unit file is managed by the virtuoso package and may be replaced during
+# a software update. That is why it is not recommended to modify it directly.
+#
+# To customize this service, create a systemd drop-in configuration file,
+# typically at:
+#
+# /etc/systemd/system/virtuoso.service.d/override.conf
+#
+# After creating or modifying a drop-in file, run `systemctl daemon-reload`.
+# The changes will take effect the next time the service is started, either
+# manually or by a systemd timer.
+#
+# For more information about systemd drop-in files, see systemd.unit(5).
+
+[Unit]
+Description=Virtuoso virtual machine data collector
+Documentation=https://github.com/Peto-RH/virtuoso
+
+[Service]
+Type=oneshot
+ExecStart=/usr/bin/virtuoso run
+
+# User context
+User=virtuoso
+Group=virtuoso
+SupplementaryGroups=libvirt
+
+# Basic hardening
+NoNewPrivileges=yes
+PrivateTmp=yes
+RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6
+
+# Logging
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=virtuoso
