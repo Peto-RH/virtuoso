@@ -8,9 +8,11 @@ import (
 	"os"
 	"time"
 
-	"github.com/pschrimp/virtuoso/internal/config"
-	"github.com/pschrimp/virtuoso/internal/provider"
-	"github.com/pschrimp/virtuoso/internal/reporter"
+	"github.com/Peto-RH/virtuoso/internal/config"
+	"github.com/Peto-RH/virtuoso/internal/destination"
+	"github.com/Peto-RH/virtuoso/internal/destination/candlepin"
+	"github.com/Peto-RH/virtuoso/internal/provider"
+	"github.com/Peto-RH/virtuoso/internal/reporter"
 )
 
 func main() {
@@ -70,7 +72,7 @@ func setLogLevel(level string) error {
 }
 
 func runStatus(configPath string) error {
-	slog.Debug("validating configuration")
+	slog.Info("starting validation")
 
 	cfg, err := config.LoadConfig(configPath)
 	if err != nil {
@@ -78,10 +80,7 @@ func runStatus(configPath string) error {
 		return fmt.Errorf("config validation failed: %w", err)
 	}
 
-	fmt.Println("Configuration valid")
-
-	// Test libvirt connection
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 
 	libvirtProvider, err := provider.NewLibvirtProvider(ctx, cfg.Source.URI)
@@ -91,7 +90,6 @@ func runStatus(configPath string) error {
 	}
 	defer libvirtProvider.Close()
 
-	// Test connection without collecting data
 	err = libvirtProvider.Ping(ctx)
 	if err != nil {
 		slog.Error("source ping failed", "uri", cfg.Source.URI, "err", err)
@@ -99,12 +97,30 @@ func runStatus(configPath string) error {
 	}
 
 	slog.Info("source validated successfully", "uri", cfg.Source.URI)
-	fmt.Println("Source reachable")
+
+	if cfg.Destination.OrgID == "" {
+		slog.Info("destination not configured", "required", "org_id in [destination] section")
+		return nil
+	}
+
+	dest, err := createDestination(&cfg.Destination)
+	if err != nil {
+		slog.Error("failed to create destination", "err", err)
+		return fmt.Errorf("destination creation failed: %w", err)
+	}
+	defer dest.Close()
+
+	if err := dest.Ping(ctx); err != nil {
+		slog.Error("destination ping failed", "err", err)
+		return fmt.Errorf("destination validation failed: %w", err)
+	}
+
+	slog.Info("validation completed successfully")
+
 	return nil
 }
 
 func runCommand(configPath string) error {
-	// Parse run-specific flags
 	runFlags := flag.NewFlagSet("run", flag.ExitOnError)
 	printFlag := runFlags.Bool("print", false, "print report to stdout")
 	runFlags.Parse(flag.Args()[1:])
@@ -124,17 +140,38 @@ func runCommand(configPath string) error {
 	defer libvirtProvider.Close()
 
 	slog.Info("starting data collection", "uri", cfg.Source.URI)
-	rep, err := libvirtProvider.Collect(ctx)
+	hyp, err := libvirtProvider.Collect(ctx)
 	if err != nil {
 		slog.Error("data collection failed", "err", err)
 		return fmt.Errorf("data collection failed: %w", err)
 	}
-	slog.Info("data collection completed", "guests", len(rep.Guests))
+	slog.Info("data collection completed", "guests", len(hyp.Guests))
 
 	if *printFlag {
 		jsonReporter := reporter.NewJSONReporter(os.Stdout)
-		return jsonReporter.Write(rep)
+		return jsonReporter.Write(hyp)
 	}
 
+	if cfg.Destination.OrgID == "" {
+		return fmt.Errorf("no destination configured: add 'org_id = \"<your_org_id>\"' to [destination] section, or use --print to output data instead")
+	}
+
+	dest, err := createDestination(&cfg.Destination)
+	if err != nil {
+		slog.Error("failed to create destination", "err", err)
+		return err
+	}
+	defer dest.Close()
+
+	if err := dest.Send(ctx, hyp); err != nil {
+		slog.Error("failed to send to destination", "err", err)
+		return err
+	}
+
+	slog.Info("data sent successfully")
 	return nil
+}
+
+func createDestination(cfg *config.DestinationConfig) (destination.Destination, error) {
+	return candlepin.NewCandlepinClient(cfg)
 }

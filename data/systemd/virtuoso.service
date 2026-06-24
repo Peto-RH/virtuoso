@@ -25,7 +25,7 @@ ExecStart=/usr/bin/virtuoso run
 # User context
 User=virtuoso
 Group=virtuoso
-SupplementaryGroups=libvirt
+SupplementaryGroups=libvirt rhsm
 
 # Basic hardening
 NoNewPrivileges=yes

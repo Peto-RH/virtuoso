@@ -9,7 +9,8 @@ import (
 )
 
 type Config struct {
-	Source SourceConfig
+	Source      SourceConfig
+	Destination DestinationConfig
 }
 
 type SourceConfig struct {
@@ -17,7 +18,13 @@ type SourceConfig struct {
 	URI  string
 }
 
-// LoadConfig loads and validates configuration from a TOML file
+type DestinationConfig struct {
+	OrgID  string `toml:"org_id"`
+	Server string
+	Port   int
+	Prefix string
+}
+
 func LoadConfig(path string) (*Config, error) {
 	slog.Debug("loading configuration", "path", path)
 
@@ -48,11 +55,9 @@ func validateConfig(cfg *Config) error {
 	if cfg.Source.Type == "" {
 		return fmt.Errorf("source.type is required")
 	}
-	if cfg.Source.Type != "libvirt" {
-		return fmt.Errorf("unsupported source type: %s (only 'libvirt' is supported)", cfg.Source.Type)
-	}
 	if cfg.Source.URI == "" {
 		return fmt.Errorf("source.uri is required")
 	}
+
 	return nil
 }

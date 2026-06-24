@@ -5,17 +5,15 @@ import (
 	"fmt"
 	"log/slog"
 
-	"github.com/pschrimp/virtuoso/internal/report"
+	"github.com/Peto-RH/virtuoso/internal/destination/candlepin"
 	"libvirt.org/go/libvirt"
 )
 
-// LibvirtProvider collects virtual machine data from libvirt
 type LibvirtProvider struct {
 	conn *libvirt.Connect
 	uri  string
 }
 
-// NewLibvirtProvider creates a new libvirt provider and establishes connection
 func NewLibvirtProvider(ctx context.Context, uri string) (*LibvirtProvider, error) {
 	slog.Debug("connecting to libvirt", "uri", uri)
 
@@ -31,8 +29,7 @@ func NewLibvirtProvider(ctx context.Context, uri string) (*LibvirtProvider, erro
 	}, nil
 }
 
-// Collect retrieves virtual machine information from libvirt
-func (p *LibvirtProvider) Collect(ctx context.Context) (*report.Report, error) {
+func (p *LibvirtProvider) Collect(ctx context.Context) (*candlepin.Hypervisor, error) {
 	slog.Debug("collecting virtual machine data")
 	slog.Debug("listing domains")
 
@@ -41,43 +38,57 @@ func (p *LibvirtProvider) Collect(ctx context.Context) (*report.Report, error) {
 		return nil, fmt.Errorf("cannot list domains: %w", err)
 	}
 
-	// Free all domain objects
 	defer func() {
 		for _, domain := range domains {
 			domain.Free()
 		}
 	}()
 
-	guests := make([]report.Guest, 0, len(domains))
+	guests := make([]candlepin.Guest, 0, len(domains))
 	for _, domain := range domains {
 		uuid, err := domain.GetUUIDString()
 		if err != nil {
-			slog.Debug("skipping domain, cannot get UUID", "err", err)
+			slog.Warn("skipping domain, cannot get UUID", "err", err)
 			continue
 		}
 
-		name, err := domain.GetName()
+		state, _, err := domain.GetState()
 		if err != nil {
-			slog.Debug("skipping domain, cannot get name", "uuid", uuid, "err", err)
-			continue
+			slog.Warn("cannot get domain state, assuming unknown", "uuid", uuid, "err", err)
+			state = libvirt.DOMAIN_NOSTATE
 		}
 
-		guests = append(guests, report.Guest{
-			UUID: uuid,
-			Name: name,
+		guestState := candlepin.GuestState(state)
+		active := 0
+		if guestState.IsActive() {
+			active = 1
+		}
+
+		guests = append(guests, candlepin.Guest{
+			GuestID: uuid,
+			State:   int(guestState),
+			Attributes: map[string]interface{}{
+				"virtWhoType": "libvirt",
+				"active":      active,
+			},
 		})
 	}
 
-	slog.Debug("data collection finished", "count", len(guests))
+	hypervisorID, err := p.conn.GetHostname()
+	if err != nil {
+		slog.Warn("cannot get hypervisor hostname, using URI", "err", err)
+		hypervisorID = p.uri
+	}
 
-	return &report.Report{
-		Source: "libvirt",
-		URI:    p.uri,
+	return &candlepin.Hypervisor{
+		HypervisorID: candlepin.HypervisorID{
+			HypervisorID: hypervisorID,
+		},
+		Name:   hypervisorID,
 		Guests: guests,
 	}, nil
 }
 
-// Ping tests the libvirt connection without collecting data
 func (p *LibvirtProvider) Ping(ctx context.Context) error {
 	slog.Debug("testing libvirt connection")
 
@@ -91,7 +102,6 @@ func (p *LibvirtProvider) Ping(ctx context.Context) error {
 	return nil
 }
 
-// Close closes the libvirt connection
 func (p *LibvirtProvider) Close() error {
 	slog.Debug("closing libvirt connection")
 	if p.conn != nil {
