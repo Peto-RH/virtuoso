@@ -7,3 +7,5 @@ require github.com/BurntSushi/toml v1.6.0
 require libvirt.org/go/libvirt v1.12003.0
 
 require github.com/google/uuid v1.6.0
+
+require github.com/urfave/cli/v3 v3.10.1
