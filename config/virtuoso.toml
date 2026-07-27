@@ -1,0 +1,18 @@
+# Virtuoso configuration file
+# Production location: /etc/virtuoso/virtuoso.toml
+
+[source]
+type = "libvirt"
+uri = "qemu:///system"
+
+[destination]
+# Organization ID from RHSM
+# Find with: subscription-manager identity
+org_id = "your-org-id-here"
+
+# Candlepin server hostname
+# Red Hat SaaS: subscription.rhsm.redhat.com
+# On-premises Satellite: satellite.yourcompany.com
+server = "subscription.rhsm.redhat.com"
+port = 443
+prefix = "/subscription"

@@ -1,0 +1,35 @@
+name: RPM Build
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    container: fedora:latest
+
+    steps:
+      - name: Install git
+        run: dnf install -y git
+
+      - uses: actions/checkout@v7
+
+      - name: Mark git checkout as safe
+        run: git config --global --add safe.directory "$GITHUB_WORKSPACE"
+
+      - name: Install build dependencies
+        run: |
+          dnf install -y rpm-build  # for rpmbuild command
+          dnf install -y dnf-plugins-core  # for builddep command
+          dnf builddep -y virtuoso.spec
+
+      - name: Build RPM
+        run: make rpm
+
+      - name: Install RPM
+        run: rpm -ivh --nodeps rpmbuild/RPMS/*/*.rpm
+
+      - name: Smoke test
+        run: virtuoso --version

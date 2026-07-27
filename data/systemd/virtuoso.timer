@@ -3,8 +3,9 @@ Description=Virtuoso virtual machine data collection timer
 Documentation=https://github.com/Peto-RH/virtuoso
 
 [Timer]
-OnBootSec=10min
-OnUnitActiveSec=1h
+OnCalendar=hourly
+RandomizedDelaySec=1h
+FixedRandomDelay=true
 Persistent=true
 
 [Install]
