@@ -8,8 +8,8 @@ import (
 	"time"
 
 	"github.com/Peto-RH/virtuoso/internal/config"
+	"github.com/Peto-RH/virtuoso/internal/destination/candlepin"
 	"github.com/Peto-RH/virtuoso/internal/provider"
-	"github.com/Peto-RH/virtuoso/internal/reporter"
 	"github.com/urfave/cli/v3"
 )
 
@@ -48,27 +48,26 @@ func runAction(ctx context.Context, cmd *cli.Command) error {
 	defer libvirtProvider.Close()
 
 	slog.Info("starting data collection", "uri", cfg.Source.URI)
-	hyp, err := libvirtProvider.Collect(ctx)
+	hypervisor, err := libvirtProvider.Collect(ctx)
 	if err != nil {
 		slog.Error("data collection failed", "err", err)
 		return fmt.Errorf("data collection failed: %w", err)
 	}
-	slog.Info("data collection completed", "guests", len(hyp.Guests))
+	slog.Info("data collection completed", "guests", len(hypervisor.Guests))
 
 	if cmd.Bool("print") {
-		jsonReporter := reporter.NewJSONReporter(os.Stdout)
-		return jsonReporter.Write(hyp)
+		return candlepin.WriteHostGuestMapping(os.Stdout, hypervisor)
 	}
 
-	dest, err := createDestination(&cfg.Destination)
+	candlepinClient, err := candlepin.NewCandlepinClient(&cfg.Destination)
 	if err != nil {
-		slog.Error("failed to create destination", "err", err)
+		slog.Error("failed to create Candlepin client", "err", err)
 		return err
 	}
-	defer dest.Close()
+	defer candlepinClient.Close()
 
-	if err := dest.Send(ctx, hyp); err != nil {
-		slog.Error("failed to send to destination", "err", err)
+	if err := candlepinClient.Send(ctx, hypervisor); err != nil {
+		slog.Error("failed to send to Candlepin", "err", err)
 		return err
 	}
 
