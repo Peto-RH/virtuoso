@@ -8,9 +8,6 @@ import (
 	"os/signal"
 	"syscall"
 
-	"github.com/Peto-RH/virtuoso/internal/config"
-	"github.com/Peto-RH/virtuoso/internal/destination"
-	"github.com/Peto-RH/virtuoso/internal/destination/candlepin"
 	"github.com/urfave/cli/v3"
 )
 
@@ -72,8 +69,4 @@ func setLogLevel(level string) error {
 
 	slog.SetLogLoggerLevel(slogLevel)
 	return nil
-}
-
-func createDestination(cfg *config.DestinationConfig) (destination.Destination, error) {
-	return candlepin.NewCandlepinClient(cfg)
 }

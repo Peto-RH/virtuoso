@@ -5,7 +5,7 @@ import (
 	"fmt"
 	"log/slog"
 
-	"github.com/Peto-RH/virtuoso/internal/destination/candlepin"
+	"github.com/Peto-RH/virtuoso/internal/report"
 	"libvirt.org/go/libvirt"
 )
 
@@ -29,7 +29,7 @@ func NewLibvirtProvider(ctx context.Context, uri string) (*LibvirtProvider, erro
 	}, nil
 }
 
-func (p *LibvirtProvider) Collect(ctx context.Context) (*candlepin.Hypervisor, error) {
+func (p *LibvirtProvider) Collect(ctx context.Context) (*report.Hypervisor, error) {
 	slog.Debug("collecting virtual machine data")
 	slog.Debug("listing domains")
 
@@ -44,33 +44,23 @@ func (p *LibvirtProvider) Collect(ctx context.Context) (*candlepin.Hypervisor, e
 		}
 	}()
 
-	guests := make([]candlepin.Guest, 0, len(domains))
+	guests := make([]report.Guest, 0, len(domains))
 	for _, domain := range domains {
-		uuid, err := domain.GetUUIDString()
+		guestID, err := domain.GetUUIDString()
 		if err != nil {
 			slog.Warn("skipping domain, cannot get UUID", "err", err)
 			continue
 		}
 
-		state, _, err := domain.GetState()
+		domainState, _, err := domain.GetState()
 		if err != nil {
-			slog.Warn("cannot get domain state, assuming unknown", "uuid", uuid, "err", err)
-			state = libvirt.DOMAIN_NOSTATE
+			slog.Warn("cannot get domain state, assuming unknown", "uuid", guestID, "err", err)
+			domainState = libvirt.DOMAIN_NOSTATE
 		}
 
-		guestState := candlepin.GuestState(state)
-		active := 0
-		if guestState.IsActive() {
-			active = 1
-		}
-
-		guests = append(guests, candlepin.Guest{
-			GuestID: uuid,
-			State:   int(guestState),
-			Attributes: map[string]interface{}{
-				"virtWhoType": "libvirt",
-				"active":      active,
-			},
+		guests = append(guests, report.Guest{
+			ID:    guestID,
+			State: guestStateFromLibvirt(domainState),
 		})
 	}
 
@@ -80,13 +70,33 @@ func (p *LibvirtProvider) Collect(ctx context.Context) (*candlepin.Hypervisor, e
 		hypervisorID = p.uri
 	}
 
-	return &candlepin.Hypervisor{
-		HypervisorID: candlepin.HypervisorID{
-			HypervisorID: hypervisorID,
-		},
+	return &report.Hypervisor{
+		Source: "libvirt",
+		ID:     hypervisorID,
 		Name:   hypervisorID,
 		Guests: guests,
 	}, nil
+}
+
+func guestStateFromLibvirt(state libvirt.DomainState) report.GuestState {
+	switch state {
+	case libvirt.DOMAIN_RUNNING:
+		return report.GuestStateRunning
+	case libvirt.DOMAIN_BLOCKED:
+		return report.GuestStateBlocked
+	case libvirt.DOMAIN_PAUSED:
+		return report.GuestStatePaused
+	case libvirt.DOMAIN_SHUTDOWN:
+		return report.GuestStateShutdown
+	case libvirt.DOMAIN_SHUTOFF:
+		return report.GuestStateShutoff
+	case libvirt.DOMAIN_CRASHED:
+		return report.GuestStateCrashed
+	case libvirt.DOMAIN_PMSUSPENDED:
+		return report.GuestStatePMSuspended
+	default:
+		return report.GuestStateUnknown
+	}
 }
 
 func (p *LibvirtProvider) Ping(ctx context.Context) error {
