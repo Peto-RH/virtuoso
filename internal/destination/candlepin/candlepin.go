@@ -12,8 +12,9 @@ import (
 	"strings"
 	"time"
 
-	"github.com/google/uuid"
 	"github.com/Peto-RH/virtuoso/internal/config"
+	"github.com/Peto-RH/virtuoso/internal/report"
+	"github.com/google/uuid"
 )
 
 const (
@@ -81,14 +82,12 @@ func NewCandlepinClient(destConfig *config.DestinationConfig) (*CandlepinClient,
 	}, nil
 }
 
-func (c *CandlepinClient) Send(ctx context.Context, hyp *Hypervisor) error {
-	slog.Debug("sending hypervisor data", "guests", len(hyp.Guests))
+func (c *CandlepinClient) Send(ctx context.Context, hypervisor *report.Hypervisor) error {
+	slog.Debug("sending hypervisor data", "guests", len(hypervisor.Guests))
 
-	reqBody := HostGuestMappingRequest{
-		Hypervisors: []Hypervisor{*hyp},
-	}
+	requestBody := newHostGuestMappingRequest(hypervisor)
 
-	jobID, err := c.reportHostGuestMapping(ctx, reqBody)
+	jobID, err := c.reportHostGuestMapping(ctx, requestBody)
 	if err != nil {
 		return fmt.Errorf("failed to report host-guest mapping: %w", err)
 	}
@@ -100,6 +99,15 @@ func (c *CandlepinClient) Send(ctx context.Context, hyp *Hypervisor) error {
 	}
 
 	slog.Debug("hypervisor data sent successfully")
+	return nil
+}
+
+func WriteHostGuestMapping(w io.Writer, hypervisor *report.Hypervisor) error {
+	encoder := json.NewEncoder(w)
+	encoder.SetIndent("", "  ")
+	if err := encoder.Encode(newHostGuestMappingRequest(hypervisor)); err != nil {
+		return fmt.Errorf("failed to encode host-guest mapping: %w", err)
+	}
 	return nil
 }
 
@@ -140,7 +148,7 @@ func (c *CandlepinClient) Close() error {
 	return nil
 }
 
-func (c *CandlepinClient) reportHostGuestMapping(ctx context.Context, data HostGuestMappingRequest) (string, error) {
+func (c *CandlepinClient) reportHostGuestMapping(ctx context.Context, data hostGuestMappingRequest) (string, error) {
 	url := fmt.Sprintf("%s/hypervisors/%s?reporter_id=%s", c.baseURL, c.orgID, c.reporterID)
 
 	body, err := json.Marshal(data)
@@ -166,7 +174,7 @@ func (c *CandlepinClient) reportHostGuestMapping(ctx context.Context, data HostG
 		return "", err
 	}
 
-	var job JobResponse
+	var job jobResponse
 	if err := json.NewDecoder(resp.Body).Decode(&job); err != nil {
 		return "", fmt.Errorf("cannot parse job response: %w", err)
 	}
@@ -201,7 +209,7 @@ func (c *CandlepinClient) waitForJobCompletion(ctx context.Context, jobID string
 				continue
 			}
 
-			var job JobResponse
+			var job jobResponse
 			err = json.NewDecoder(resp.Body).Decode(&job)
 			resp.Body.Close()
 

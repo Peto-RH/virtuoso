@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/Peto-RH/virtuoso/internal/config"
+	"github.com/Peto-RH/virtuoso/internal/destination/candlepin"
 	"github.com/Peto-RH/virtuoso/internal/provider"
 	"github.com/urfave/cli/v3"
 )
@@ -48,14 +49,14 @@ func statusAction(ctx context.Context, cmd *cli.Command) error {
 
 	slog.Info("source validated successfully", "uri", cfg.Source.URI)
 
-	dest, err := createDestination(&cfg.Destination)
+	candlepinClient, err := candlepin.NewCandlepinClient(&cfg.Destination)
 	if err != nil {
-		slog.Error("failed to create destination", "err", err)
+		slog.Error("failed to create Candlepin client", "err", err)
 		return fmt.Errorf("destination creation failed: %w", err)
 	}
-	defer dest.Close()
+	defer candlepinClient.Close()
 
-	if err := dest.Ping(ctx); err != nil {
+	if err := candlepinClient.Ping(ctx); err != nil {
 		slog.Error("destination ping failed", "err", err)
 		return fmt.Errorf("destination validation failed: %w", err)
 	}
