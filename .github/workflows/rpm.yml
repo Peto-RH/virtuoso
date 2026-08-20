@@ -33,3 +33,6 @@ jobs:
 
       - name: Smoke test
         run: virtuoso --version
+
+      - name: Run tests
+        run: make test
