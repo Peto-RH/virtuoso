@@ -4,6 +4,8 @@ import (
 	"bytes"
 	"encoding/json"
 	"errors"
+	"io"
+	"net/http"
 	"reflect"
 	"strings"
 	"testing"
@@ -89,6 +91,81 @@ func TestWriteHostGuestMapping_WriterError(t *testing.T) {
 	}
 	if !strings.Contains(err.Error(), "failed to encode host-guest mapping") {
 		t.Errorf("WriteHostGuestMapping() error = %q, want encoding context", err)
+	}
+}
+
+func TestHandleHTTPError(t *testing.T) {
+	tests := []struct {
+		name       string
+		statusCode int
+		body       string
+		retryAfter string
+		wantError  string
+	}{
+		{name: "OK", statusCode: http.StatusOK},
+		{name: "successful upper boundary", statusCode: 299},
+		{
+			name:       "consumer certificate gone",
+			statusCode: http.StatusGone,
+			wantError:  "consumer certificate invalid (HTTP 410 Gone) - system may need re-registration",
+		},
+		{
+			name:       "rate limited",
+			statusCode: http.StatusTooManyRequests,
+			retryAfter: "120",
+			wantError:  "rate limited (HTTP 429), retry after: 120",
+		},
+		{
+			name:       "generic HTTP error",
+			statusCode: http.StatusServiceUnavailable,
+			body:       "service unavailable",
+			wantError:  "HTTP 503: service unavailable",
+		},
+	}
+
+	client := &CandlepinClient{}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			response := &http.Response{
+				StatusCode: tt.statusCode,
+				Header:     make(http.Header),
+				Body:       io.NopCloser(strings.NewReader(tt.body)),
+			}
+			response.Header.Set("Retry-After", tt.retryAfter)
+
+			err := client.handleHTTPError(response)
+			if tt.wantError == "" {
+				if err != nil {
+					t.Fatalf("handleHTTPError() error = %v", err)
+				}
+				return
+			}
+
+			if err == nil {
+				t.Fatalf("handleHTTPError() error = nil, want %q", tt.wantError)
+			}
+			if err.Error() != tt.wantError {
+				t.Errorf("handleHTTPError() error = %q, want %q", err, tt.wantError)
+			}
+		})
+	}
+}
+
+func TestHandleHTTPError_TruncatesResponseBody(t *testing.T) {
+	body := strings.Repeat("x", 1025)
+	response := &http.Response{
+		StatusCode: http.StatusInternalServerError,
+		Header:     make(http.Header),
+		Body:       io.NopCloser(strings.NewReader(body)),
+	}
+
+	err := (&CandlepinClient{}).handleHTTPError(response)
+	wantError := "HTTP 500: " + strings.Repeat("x", 1024)
+	if err == nil {
+		t.Fatalf("handleHTTPError() error = nil, want %q", wantError)
+	}
+	if err.Error() != wantError {
+		t.Errorf("handleHTTPError() error = %q, want %q", err, wantError)
 	}
 }
 
