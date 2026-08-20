@@ -63,8 +63,7 @@ func beforeAction(ctx context.Context, cmd *cli.Command) (context.Context, error
 func setLogLevel(level string) error {
 	var slogLevel slog.Level
 	if err := slogLevel.UnmarshalText([]byte(level)); err != nil {
-		slog.Error(fmt.Sprintf("invalid log level '%s'", level))
-		slogLevel = slog.LevelInfo
+		return fmt.Errorf("invalid --log-level %q: %w", level, err)
 	}
 
 	slog.SetLogLoggerLevel(slogLevel)
