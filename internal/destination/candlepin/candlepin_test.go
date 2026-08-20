@@ -194,3 +194,43 @@ type errorWriter struct {
 func (w errorWriter) Write([]byte) (int, error) {
 	return 0, w.err
 }
+
+func TestEvaluateJobState(t *testing.T) {
+	tests := []struct {
+		name         string
+		state        string
+		wantFinished bool
+		wantError    string
+	}{
+		{name: "finished", state: "FINISHED", wantFinished: true},
+		{name: "failed", state: "FAILED", wantError: "job job-123: FAILED"},
+		{name: "canceled", state: "CANCELED", wantError: "job job-123: CANCELED"},
+		{name: "created", state: "CREATED"},
+		{name: "waiting", state: "WAITING"},
+		{name: "running", state: "RUNNING"},
+		{name: "unknown", state: "UNKNOWN"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			finished, err := evaluateJobState("job-123", tt.state)
+			if finished != tt.wantFinished {
+				t.Errorf("evaluateJobState() finished = %t, want %t", finished, tt.wantFinished)
+			}
+
+			if tt.wantError == "" {
+				if err != nil {
+					t.Fatalf("evaluateJobState() error = %v", err)
+				}
+				return
+			}
+
+			if err == nil {
+				t.Fatalf("evaluateJobState() error = nil, want %q", tt.wantError)
+			}
+			if err.Error() != tt.wantError {
+				t.Errorf("evaluateJobState() error = %q, want %q", err, tt.wantError)
+			}
+		})
+	}
+}

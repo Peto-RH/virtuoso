@@ -220,17 +220,28 @@ func (c *CandlepinClient) waitForJobCompletion(ctx context.Context, jobID string
 
 			slog.Debug("job status", "state", job.State)
 
-			switch job.State {
-			case "FINISHED":
+			finished, err := evaluateJobState(jobID, job.State)
+			if err != nil {
+				return err
+			}
+			if finished {
 				return nil
-			case "FAILED", "CANCELED":
-				return fmt.Errorf("job %s: %s", jobID, job.State)
-			case "CREATED", "WAITING", "RUNNING":
-				continue
-			default:
-				slog.Warn("unknown job state", "state", job.State)
 			}
 		}
+	}
+}
+
+func evaluateJobState(jobID, state string) (bool, error) {
+	switch state {
+	case "FINISHED":
+		return true, nil
+	case "FAILED", "CANCELED":
+		return false, fmt.Errorf("job %s: %s", jobID, state)
+	case "CREATED", "WAITING", "RUNNING":
+		return false, nil
+	default:
+		slog.Warn("unknown job state", "state", state)
+		return false, nil
 	}
 }
 
