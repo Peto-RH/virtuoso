@@ -42,3 +42,8 @@ rpm: source-tarball
 .PHONY: test
 test:
 	go test ./...
+
+.PHONY: component-test
+component-test: build
+	VIRTUOSO_COMPONENT_BINARY="$(CURDIR)/$(OUTPUT_DIR)/virtuoso" \
+		go test -count=1 -tags=component ./tests/component/...
