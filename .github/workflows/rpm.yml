@@ -25,6 +25,12 @@ jobs:
           dnf install -y dnf-plugins-core  # for builddep command
           dnf builddep -y virtuoso.spec
 
+      - name: Run package tests
+        run: make test
+
+      - name: Run component tests
+        run: make component-test
+
       - name: Build RPM
         run: make rpm
 
@@ -33,6 +39,3 @@ jobs:
 
       - name: Smoke test
         run: virtuoso --version
-
-      - name: Run tests
-        run: make test
