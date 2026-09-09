@@ -1,0 +1,27 @@
+name: Lint
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  lint:
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-go@v7
+        with:
+          go-version-file: go.mod
+
+      - name: Install libvirt development files
+        run: sudo apt-get update && sudo apt-get install -y libvirt-dev
+
+      - uses: golangci/golangci-lint-action@v9
+        with:
+          version: v2.13.2
