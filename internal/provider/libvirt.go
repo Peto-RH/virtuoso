@@ -11,7 +11,6 @@ import (
 
 type LibvirtProvider struct {
 	conn *libvirt.Connect
-	uri  string
 }
 
 func NewLibvirtProvider(ctx context.Context, uri string) (*LibvirtProvider, error) {
@@ -25,7 +24,6 @@ func NewLibvirtProvider(ctx context.Context, uri string) (*LibvirtProvider, erro
 	slog.Debug("connection established")
 	return &LibvirtProvider{
 		conn: conn,
-		uri:  uri,
 	}, nil
 }
 
@@ -66,8 +64,7 @@ func (p *LibvirtProvider) Collect(ctx context.Context) (*report.Hypervisor, erro
 
 	hypervisorID, err := p.conn.GetHostname()
 	if err != nil {
-		slog.Warn("cannot get hypervisor hostname, using URI", "err", err)
-		hypervisorID = p.uri
+		return nil, fmt.Errorf("cannot get hypervisor hostname: %w", err)
 	}
 
 	return &report.Hypervisor{
