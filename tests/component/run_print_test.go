@@ -3,64 +3,21 @@
 package component_test
 
 import (
-	"bytes"
-	"context"
-	"encoding/json"
 	"fmt"
-	"io"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
-	"time"
 )
 
-const componentBinaryEnvironment = "VIRTUOSO_COMPONENT_BINARY"
-
-// printedMapping mirrors the JSON shape of hostGuestMappingRequest in
-// internal/destination/candlepin/models.go.
-type printedMapping struct {
-	Hypervisors []printedHypervisor `json:"hypervisors"`
-}
-
-// printedHypervisor mirrors the JSON shape of hypervisor and hypervisorID in
-// internal/destination/candlepin/models.go.
-type printedHypervisor struct {
-	HypervisorID struct {
-		HypervisorID string `json:"hypervisorId"`
-	} `json:"hypervisorId"`
-	Name   string         `json:"name"`
-	Guests []printedGuest `json:"guestIds"`
-}
-
-// printedGuest mirrors the JSON shape of guest and guestAttributes in
-// internal/destination/candlepin/models.go.
-type printedGuest struct {
-	GuestID    string `json:"guestId"`
-	State      int    `json:"state"`
-	Attributes struct {
-		VirtWhoType string `json:"virtWhoType"`
-		Active      int    `json:"active"`
-	} `json:"attributes"`
-}
-
 func TestComponentRunPrint(t *testing.T) {
-	configPath := writeComponentConfig(t, libvirtTestURI(t))
-	stdout, stderr, err := runComponentBinary(t, configPath)
+	configPath := writeLibvirtComponentConfig(t, libvirtTestURI(t))
+	stdout, stderr, err := runComponentBinary(t, configPath, "run", "--print")
 	if err != nil {
 		t.Fatalf("virtuoso run --print error = %v\nstdout:\n%s\nstderr:\n%s", err, stdout, stderr)
 	}
 
-	var mapping printedMapping
-	decoder := json.NewDecoder(bytes.NewReader(stdout))
-	if err := decoder.Decode(&mapping); err != nil {
-		t.Fatalf("decode printed mapping: %v\nstdout:\n%s", err, stdout)
-	}
-	var trailing any
-	if err := decoder.Decode(&trailing); err != io.EOF {
-		t.Fatalf("printed mapping contains trailing JSON: %v\nstdout:\n%s", err, stdout)
-	}
+	mapping := decodePrintedMapping(t, stdout)
 
 	if len(mapping.Hypervisors) != 1 {
 		t.Fatalf("printed hypervisor count = %d, want 1", len(mapping.Hypervisors))
@@ -108,8 +65,8 @@ func TestComponentRunPrint(t *testing.T) {
 
 func TestComponentRunPrintSourceFailure(t *testing.T) {
 	missingFixture := filepath.Join(t.TempDir(), "missing-node.xml")
-	configPath := writeComponentConfig(t, "test://"+filepath.ToSlash(missingFixture))
-	stdout, stderr, err := runComponentBinary(t, configPath)
+	configPath := writeLibvirtComponentConfig(t, "test://"+filepath.ToSlash(missingFixture))
+	stdout, stderr, err := runComponentBinary(t, configPath, "run", "--print")
 	if err == nil {
 		t.Fatalf("virtuoso run --print error = nil\nstdout:\n%s\nstderr:\n%s", stdout, stderr)
 	}
@@ -120,34 +77,29 @@ func TestComponentRunPrintSourceFailure(t *testing.T) {
 	}
 }
 
-func runComponentBinary(t *testing.T, configPath string) ([]byte, []byte, error) {
-	t.Helper()
+func TestComponentLibvirtDoesNotRequireVMwareCredential(t *testing.T) {
+	for _, credentialsDir := range []string{"", filepath.Join(t.TempDir(), "missing-credentials")} {
+		name := "no credentials directory"
+		if credentialsDir != "" {
+			name = "unavailable credentials directory"
+		}
+		t.Run(name, func(t *testing.T) {
+			t.Setenv("CREDENTIALS_DIRECTORY", credentialsDir)
+			configPath := writeLibvirtComponentConfig(t, libvirtTestURI(t))
 
-	binaryPath := os.Getenv(componentBinaryEnvironment)
-	if binaryPath == "" {
-		t.Fatalf("%s is required", componentBinaryEnvironment)
+			stdout, stderr, err := runComponentBinary(t, configPath, "run", "--print")
+			if err != nil {
+				t.Fatalf("libvirt required a VMware credential: %v\nstdout:\n%s\nstderr:\n%s", err, stdout, stderr)
+			}
+			mapping := decodePrintedMapping(t, stdout)
+			if len(mapping.Hypervisors) != 1 || len(mapping.Hypervisors[0].Guests) != 3 {
+				t.Errorf("libvirt did not collect the expected host and guests: %+v", mapping)
+			}
+		})
 	}
-	if !filepath.IsAbs(binaryPath) {
-		t.Fatalf("%s must be an absolute path, got %q", componentBinaryEnvironment, binaryPath)
-	}
-
-	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
-	defer cancel()
-
-	command := exec.CommandContext(ctx, binaryPath, "--config", configPath, "run", "--print")
-	var stdout bytes.Buffer
-	var stderr bytes.Buffer
-	command.Stdout = &stdout
-	command.Stderr = &stderr
-	err := command.Run()
-	if ctx.Err() != nil {
-		t.Fatalf("virtuoso run --print timed out: %v", ctx.Err())
-	}
-
-	return stdout.Bytes(), stderr.Bytes(), err
 }
 
-func writeComponentConfig(t *testing.T, sourceURI string) string {
+func writeLibvirtComponentConfig(t *testing.T, sourceURI string) string {
 	t.Helper()
 
 	configPath := filepath.Join(t.TempDir(), "virtuoso.toml")

@@ -1,6 +1,6 @@
 module github.com/Peto-RH/virtuoso
 
-go 1.23
+go 1.23.0
 
 require github.com/BurntSushi/toml v1.6.0
 
@@ -9,3 +9,5 @@ require libvirt.org/go/libvirt v1.12003.0
 require github.com/google/uuid v1.6.0
 
 require github.com/urfave/cli/v3 v3.10.1
+
+require github.com/vmware/govmomi v0.52.0
