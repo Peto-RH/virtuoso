@@ -2,26 +2,29 @@ package candlepin
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"errors"
 	"io"
 	"net/http"
+	"net/http/httptest"
 	"reflect"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/Peto-RH/virtuoso/internal/report"
 )
 
 func TestWriteHostGuestMapping(t *testing.T) {
 	tests := []struct {
-		name                string
-		collectedHypervisor *report.Hypervisor
-		wantJSON            string
+		name                 string
+		collectedHypervisors []report.Hypervisor
+		wantJSON             string
 	}{
 		{
 			name: "maps report to Candlepin format",
-			collectedHypervisor: &report.Hypervisor{
+			collectedHypervisors: []report.Hypervisor{{
 				Source: "libvirt",
 				ID:     "hypervisor-1",
 				Name:   "hypervisor.example.com",
@@ -36,7 +39,7 @@ func TestWriteHostGuestMapping(t *testing.T) {
 					{ID: "unknown", State: report.GuestStateUnknown},
 					{ID: "unsupported", State: report.GuestState(99)},
 				},
-			},
+			}},
 			wantJSON: `{
 				"hypervisors": [{
 					"hypervisorId": {"hypervisorId": "hypervisor-1"},
@@ -57,10 +60,10 @@ func TestWriteHostGuestMapping(t *testing.T) {
 		},
 		{
 			name: "omits empty name and writes empty guest list",
-			collectedHypervisor: &report.Hypervisor{
+			collectedHypervisors: []report.Hypervisor{{
 				Source: "libvirt",
 				ID:     "hypervisor-2",
-			},
+			}},
 			wantJSON: `{
 				"hypervisors": [{
 					"hypervisorId": {"hypervisorId": "hypervisor-2"},
@@ -68,12 +71,21 @@ func TestWriteHostGuestMapping(t *testing.T) {
 				}]
 			}`,
 		},
+		{
+			name:     "nil collection writes an empty array",
+			wantJSON: `{"hypervisors": []}`,
+		},
+		{
+			name:                 "empty collection writes an empty array",
+			collectedHypervisors: []report.Hypervisor{},
+			wantJSON:             `{"hypervisors": []}`,
+		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			var output bytes.Buffer
-			if err := WriteHostGuestMapping(&output, tt.collectedHypervisor); err != nil {
+			if err := WriteHostGuestMapping(&output, tt.collectedHypervisors); err != nil {
 				t.Fatalf("WriteHostGuestMapping() error = %v", err)
 			}
 
@@ -82,9 +94,116 @@ func TestWriteHostGuestMapping(t *testing.T) {
 	}
 }
 
+func TestWriteHostGuestMappingMultipleHypervisors(t *testing.T) {
+	collectedHypervisors := []report.Hypervisor{
+		{
+			Source: "libvirt",
+			ID:     "host-1-uuid",
+			Name:   "esxi-1.example.com",
+			Guests: []report.Guest{
+				{ID: "running-vm", State: report.GuestStateRunning},
+			},
+		},
+		{
+			Source: "esx",
+			ID:     "host-2-uuid",
+			Name:   "esxi-2.example.com",
+			Guests: []report.Guest{
+				{ID: "paused-vm", State: report.GuestStatePaused},
+			},
+		},
+	}
+
+	var output bytes.Buffer
+	if err := WriteHostGuestMapping(&output, collectedHypervisors); err != nil {
+		t.Fatalf("WriteHostGuestMapping() error = %v", err)
+	}
+
+	assertJSONEqual(t, output.String(), `{
+		"hypervisors": [
+			{
+				"hypervisorId": {"hypervisorId": "host-1-uuid"},
+				"name": "esxi-1.example.com",
+				"guestIds": [
+					{"guestId": "running-vm", "state": 1, "attributes": {"virtWhoType": "libvirt", "active": 1}}
+				]
+			},
+			{
+				"hypervisorId": {"hypervisorId": "host-2-uuid"},
+				"name": "esxi-2.example.com",
+				"guestIds": [
+					{"guestId": "paused-vm", "state": 3, "attributes": {"virtWhoType": "esx", "active": 1}}
+				]
+			}
+		]
+	}`)
+}
+
+func TestSendMultipleHypervisorsInOneRequest(t *testing.T) {
+	postedMappings := make(chan string, 2)
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case r.Method == http.MethodPost && r.URL.Path == "/hypervisors/org":
+			body, err := io.ReadAll(r.Body)
+			if err != nil {
+				http.Error(w, err.Error(), http.StatusBadRequest)
+				return
+			}
+			select {
+			case postedMappings <- string(body):
+			default:
+				http.Error(w, "too many report requests", http.StatusInternalServerError)
+				return
+			}
+			w.WriteHeader(http.StatusAccepted)
+			_, _ = io.WriteString(w, `{"id":"job-1"}`)
+		case r.Method == http.MethodGet && r.URL.Path == "/jobs/job-1":
+			_, _ = io.WriteString(w, `{"state":"FINISHED"}`)
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer server.Close()
+
+	client := &CandlepinClient{
+		httpClient: server.Client(),
+		baseURL:    server.URL,
+		orgID:      "org",
+		reporterID: "reporter",
+	}
+	defer client.Close()
+	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+	defer cancel()
+
+	hypervisors := []report.Hypervisor{
+		{Source: "esx", ID: "host-1", Guests: []report.Guest{{ID: "vm-1", State: report.GuestStateRunning}}},
+		{Source: "esx", ID: "host-2"},
+	}
+	if err := client.Send(ctx, hypervisors); err != nil {
+		t.Fatalf("Send() error = %v", err)
+	}
+	if len(postedMappings) != 1 {
+		t.Fatalf("Send() made %d report requests, want 1", len(postedMappings))
+	}
+	assertJSONEqual(t, <-postedMappings, `{
+		"hypervisors": [
+			{
+				"hypervisorId": {"hypervisorId": "host-1"},
+				"guestIds": [
+					{"guestId": "vm-1", "state": 1, "attributes": {"virtWhoType": "esx", "active": 1}}
+				]
+			},
+			{
+				"hypervisorId": {"hypervisorId": "host-2"},
+				"guestIds": []
+			}
+		]
+	}`)
+}
+
 func TestWriteHostGuestMapping_WriterError(t *testing.T) {
 	writeErr := errors.New("write failed")
-	err := WriteHostGuestMapping(errorWriter{err: writeErr}, &report.Hypervisor{})
+	err := WriteHostGuestMapping(errorWriter{err: writeErr}, []report.Hypervisor{{}})
 
 	if !errors.Is(err, writeErr) {
 		t.Fatalf("WriteHostGuestMapping() error = %v, want wrapped %v", err, writeErr)
@@ -183,7 +302,7 @@ func assertJSONEqual(t *testing.T, gotJSON, wantJSON string) {
 	}
 
 	if !reflect.DeepEqual(got, want) {
-		t.Errorf("WriteHostGuestMapping() JSON = %s, want %s", gotJSON, wantJSON)
+		t.Errorf("mapping JSON = %s, want %s", gotJSON, wantJSON)
 	}
 }
 

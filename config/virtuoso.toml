@@ -5,6 +5,13 @@
 type = "libvirt"
 uri = "qemu:///system"
 
+# example config for VMware source
+# [source]
+# type = "vmware"
+# uri = "https://vcenter.example.com/sdk"
+# username = "virtuoso-reporter"
+# ca_file = "/etc/virtuoso/vcenter-ca.pem"
+
 [destination]
 # Organization ID from RHSM
 # Find with: subscription-manager identity
