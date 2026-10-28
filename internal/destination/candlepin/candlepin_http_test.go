@@ -143,7 +143,7 @@ func TestCandlepinClientSend(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
 	defer cancel()
 
-	err := client.Send(ctx, &report.Hypervisor{
+	err := client.Send(ctx, []report.Hypervisor{{
 		Source: "libvirt",
 		ID:     "hypervisor-1",
 		Name:   "hypervisor.example.test",
@@ -151,7 +151,7 @@ func TestCandlepinClientSend(t *testing.T) {
 			{ID: "running-guest", State: report.GuestStateRunning},
 			{ID: "stopped-guest", State: report.GuestStateShutoff},
 		},
-	})
+	}})
 	if err != nil {
 		t.Fatalf("Send() error = %v", err)
 	}

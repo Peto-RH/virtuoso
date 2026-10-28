@@ -35,19 +35,23 @@ func statusAction(ctx context.Context, cmd *cli.Command) error {
 	ctx, cancel := context.WithTimeout(ctx, status_timeout)
 	defer cancel()
 
-	libvirtProvider, err := provider.NewLibvirtProvider(ctx, cfg.Source.URI)
+	sourceProvider, err := provider.NewProvider(ctx, &cfg.Source)
 	if err != nil {
-		slog.Error("failed to connect to source", "uri", cfg.Source.URI, "err", err)
+		slog.Error("failed to connect to source", "source_type", cfg.Source.Type, "err", err)
 		return fmt.Errorf("source validation failed: %w", err)
 	}
-	defer libvirtProvider.Close()
+	defer func() {
+		if err := sourceProvider.Close(); err != nil {
+			slog.Warn("failed to close source", "source_type", cfg.Source.Type, "err", err)
+		}
+	}()
 
-	if err := libvirtProvider.Ping(ctx); err != nil {
-		slog.Error("source ping failed", "uri", cfg.Source.URI, "err", err)
+	if err := sourceProvider.Ping(ctx); err != nil {
+		slog.Error("source ping failed", "source_type", cfg.Source.Type, "err", err)
 		return fmt.Errorf("source validation failed: %w", err)
 	}
 
-	slog.Info("source validated successfully", "uri", cfg.Source.URI)
+	slog.Info("source validated successfully", "source_type", cfg.Source.Type)
 
 	candlepinClient, err := candlepin.NewCandlepinClient(&cfg.Destination)
 	if err != nil {

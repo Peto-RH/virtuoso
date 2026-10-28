@@ -40,23 +40,35 @@ func runAction(ctx context.Context, cmd *cli.Command) error {
 	ctx, cancel := context.WithTimeout(ctx, run_timeout)
 	defer cancel()
 
-	libvirtProvider, err := provider.NewLibvirtProvider(ctx, cfg.Source.URI)
+	sourceProvider, err := provider.NewProvider(ctx, &cfg.Source)
 	if err != nil {
-		slog.Error("failed to connect to source", "uri", cfg.Source.URI, "err", err)
+		slog.Error("failed to connect to source", "source_type", cfg.Source.Type, "err", err)
 		return err
 	}
-	defer libvirtProvider.Close()
+	defer func() {
+		if err := sourceProvider.Close(); err != nil {
+			slog.Warn("failed to close source", "source_type", cfg.Source.Type, "err", err)
+		}
+	}()
 
-	slog.Info("starting data collection", "uri", cfg.Source.URI)
-	hypervisor, err := libvirtProvider.Collect(ctx)
+	slog.Info("starting data collection", "source_type", cfg.Source.Type)
+	hypervisors, err := sourceProvider.Collect(ctx)
 	if err != nil {
 		slog.Error("data collection failed", "err", err)
 		return fmt.Errorf("data collection failed: %w", err)
 	}
-	slog.Info("data collection completed", "guests", len(hypervisor.Guests))
+	guestCount := 0
+	for _, hypervisor := range hypervisors {
+		guestCount += len(hypervisor.Guests)
+	}
+	slog.Info("data collection completed", "hosts", len(hypervisors), "guests", guestCount)
 
 	if cmd.Bool("print") {
-		return candlepin.WriteHostGuestMapping(os.Stdout, hypervisor)
+		return candlepin.WriteHostGuestMapping(os.Stdout, hypervisors)
+	}
+	if len(hypervisors) == 0 {
+		slog.Info("no hypervisors collected, skipping reporting")
+		return nil
 	}
 
 	candlepinClient, err := candlepin.NewCandlepinClient(&cfg.Destination)
@@ -66,7 +78,7 @@ func runAction(ctx context.Context, cmd *cli.Command) error {
 	}
 	defer candlepinClient.Close()
 
-	if err := candlepinClient.Send(ctx, hypervisor); err != nil {
+	if err := candlepinClient.Send(ctx, hypervisors); err != nil {
 		slog.Error("failed to send to Candlepin", "err", err)
 		return err
 	}

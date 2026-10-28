@@ -29,7 +29,7 @@ func NewLibvirtProvider(ctx context.Context, uri string) (*LibvirtProvider, erro
 	}, nil
 }
 
-func (p *LibvirtProvider) Collect(ctx context.Context) (*report.Hypervisor, error) {
+func (p *LibvirtProvider) Collect(ctx context.Context) ([]report.Hypervisor, error) {
 	slog.Debug("collecting virtual machine data")
 	slog.Debug("listing domains")
 
@@ -70,12 +70,12 @@ func (p *LibvirtProvider) Collect(ctx context.Context) (*report.Hypervisor, erro
 		hypervisorID = p.uri
 	}
 
-	return &report.Hypervisor{
+	return []report.Hypervisor{{
 		Source: "libvirt",
 		ID:     hypervisorID,
 		Name:   hypervisorID,
 		Guests: guests,
-	}, nil
+	}}, nil
 }
 
 func guestStateFromLibvirt(state libvirt.DomainState) report.GuestState {

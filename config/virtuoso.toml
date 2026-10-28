@@ -5,11 +5,12 @@
 type = "libvirt"
 uri = "qemu:///system"
 
-# example config for VMware source
+# VMware alternative: replace the active [source] above.
 # [source]
 # type = "vmware"
 # uri = "https://vcenter.example.com/sdk"
 # username = "virtuoso-reporter"
+# Optional PEM CA bundle replacing system trust for VMware.
 # ca_file = "/etc/virtuoso/vcenter-ca.pem"
 
 [destination]

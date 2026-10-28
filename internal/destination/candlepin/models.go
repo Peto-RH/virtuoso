@@ -45,28 +45,27 @@ type jobResponse struct {
 	State string `json:"state"`
 }
 
-func newHostGuestMappingRequest(collectedHypervisor *report.Hypervisor) hostGuestMappingRequest {
-	guests := make([]guest, 0, len(collectedHypervisor.Guests))
-	for _, collectedGuest := range collectedHypervisor.Guests {
-		guests = append(guests, guest{
-			GuestID: collectedGuest.ID,
-			State:   guestStateFromReport(collectedGuest.State),
-			Attributes: guestAttributes{
-				VirtWhoType: collectedHypervisor.Source,
-				Active:      activeValue(collectedGuest.State),
-			},
+func newHostGuestMappingRequest(hypervisors []report.Hypervisor) hostGuestMappingRequest {
+	request := hostGuestMappingRequest{Hypervisors: make([]hypervisor, 0, len(hypervisors))}
+	for _, collectedHypervisor := range hypervisors {
+		guests := make([]guest, 0, len(collectedHypervisor.Guests))
+		for _, collectedGuest := range collectedHypervisor.Guests {
+			guests = append(guests, guest{
+				GuestID: collectedGuest.ID,
+				State:   guestStateFromReport(collectedGuest.State),
+				Attributes: guestAttributes{
+					VirtWhoType: collectedHypervisor.Source,
+					Active:      activeValue(collectedGuest.State),
+				},
+			})
+		}
+		request.Hypervisors = append(request.Hypervisors, hypervisor{
+			HypervisorID: hypervisorID{HypervisorID: collectedHypervisor.ID},
+			Name:         collectedHypervisor.Name,
+			Guests:       guests,
 		})
 	}
-
-	return hostGuestMappingRequest{
-		Hypervisors: []hypervisor{
-			{
-				HypervisorID: hypervisorID{HypervisorID: collectedHypervisor.ID},
-				Name:         collectedHypervisor.Name,
-				Guests:       guests,
-			},
-		},
-	}
+	return request
 }
 
 func guestStateFromReport(state report.GuestState) guestState {

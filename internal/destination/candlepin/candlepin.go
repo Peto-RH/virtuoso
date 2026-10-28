@@ -82,10 +82,10 @@ func NewCandlepinClient(destConfig *config.DestinationConfig) (*CandlepinClient,
 	}, nil
 }
 
-func (c *CandlepinClient) Send(ctx context.Context, hypervisor *report.Hypervisor) error {
-	slog.Debug("sending hypervisor data", "guests", len(hypervisor.Guests))
+func (c *CandlepinClient) Send(ctx context.Context, hypervisors []report.Hypervisor) error {
+	slog.Debug("sending hypervisor data", "hosts", len(hypervisors))
 
-	requestBody := newHostGuestMappingRequest(hypervisor)
+	requestBody := newHostGuestMappingRequest(hypervisors)
 
 	jobID, err := c.reportHostGuestMapping(ctx, requestBody)
 	if err != nil {
@@ -102,10 +102,10 @@ func (c *CandlepinClient) Send(ctx context.Context, hypervisor *report.Hyperviso
 	return nil
 }
 
-func WriteHostGuestMapping(w io.Writer, hypervisor *report.Hypervisor) error {
+func WriteHostGuestMapping(w io.Writer, hypervisors []report.Hypervisor) error {
 	encoder := json.NewEncoder(w)
 	encoder.SetIndent("", "  ")
-	if err := encoder.Encode(newHostGuestMappingRequest(hypervisor)); err != nil {
+	if err := encoder.Encode(newHostGuestMappingRequest(hypervisors)); err != nil {
 		return fmt.Errorf("failed to encode host-guest mapping: %w", err)
 	}
 	return nil

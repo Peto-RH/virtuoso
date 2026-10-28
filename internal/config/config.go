@@ -14,8 +14,10 @@ type Config struct {
 }
 
 type SourceConfig struct {
-	Type string
-	URI  string
+	Type     string
+	URI      string
+	Username string
+	CAFile   string `toml:"ca_file"`
 }
 
 type DestinationConfig struct {
