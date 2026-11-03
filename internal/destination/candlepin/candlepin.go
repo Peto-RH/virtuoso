@@ -185,8 +185,8 @@ func (c *CandlepinClient) reportHostGuestMapping(ctx context.Context, data hostG
 func (c *CandlepinClient) waitForJobCompletion(ctx context.Context, jobID string) error {
 	url := fmt.Sprintf("%s/jobs/%s", c.baseURL, jobID)
 
-	ticker := time.NewTicker(jobPollInterval)
-	defer ticker.Stop()
+	timer := time.NewTimer(500 * time.Millisecond)
+	defer timer.Stop()
 
 	timeout := time.After(jobPollTimeout)
 
@@ -196,7 +196,8 @@ func (c *CandlepinClient) waitForJobCompletion(ctx context.Context, jobID string
 			return ctx.Err()
 		case <-timeout:
 			return fmt.Errorf("job polling timeout after %v", jobPollTimeout)
-		case <-ticker.C:
+		case <-timer.C:
+			timer.Reset(jobPollInterval)
 			req, err := http.NewRequestWithContext(ctx, "GET", url, nil)
 			if err != nil {
 				return err
