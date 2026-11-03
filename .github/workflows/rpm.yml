@@ -35,7 +35,7 @@ jobs:
         run: make rpm
 
       - name: Install RPM
-        run: rpm -ivh --nodeps rpmbuild/RPMS/*/*.rpm
+        run: rpm -ivh --nodeps --nosignature rpmbuild/RPMS/*/*.rpm
 
       - name: Smoke test
         run: virtuoso --version
