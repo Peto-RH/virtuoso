@@ -26,7 +26,7 @@ func statusAction(ctx context.Context, cmd *cli.Command) error {
 	slog.Info("starting validation")
 
 	configPath := cmd.Root().String("config")
-	cfg, err := config.LoadConfig(configPath)
+	cfg, err := config.LoadConfig(configPath, true)
 	if err != nil {
 		slog.Error("configuration validation failed", "err", err)
 		return fmt.Errorf("config validation failed: %w", err)

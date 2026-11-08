@@ -31,7 +31,7 @@ var runCommand = &cli.Command{
 
 func runAction(ctx context.Context, cmd *cli.Command) error {
 	configPath := cmd.Root().String("config")
-	cfg, err := config.LoadConfig(configPath)
+	cfg, err := config.LoadConfig(configPath, !cmd.Bool("print"))
 	if err != nil {
 		slog.Error("failed to load configuration", "err", err)
 		return err

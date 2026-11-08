@@ -1,5 +1,4 @@
-# Virtuoso configuration file
-# Production location: /etc/virtuoso/virtuoso.toml
+# Installed path: /etc/virtuoso/virtuoso.toml
 
 [source]
 type = "libvirt"
@@ -10,17 +9,15 @@ uri = "qemu:///system"
 # type = "vmware"
 # uri = "https://vcenter.example.com/sdk"
 # username = "virtuoso-reporter"
-# Optional PEM CA bundle replacing system trust for VMware.
-# ca_file = "/etc/virtuoso/vcenter-ca.pem"
+# ca_file = "/etc/virtuoso/vcenter-ca.pem" # Optional; replaces system trust.
+# See README.md for vmware password setup
 
 [destination]
-# Organization ID from RHSM
-# Find with: subscription-manager identity
+# Organization ID from: subscription-manager identity
 org_id = "your-org-id-here"
 
-# Candlepin server hostname
-# Red Hat SaaS: subscription.rhsm.redhat.com
-# On-premises Satellite: satellite.yourcompany.com
+# Virtuoso builds the endpoint URL as https://{server}:{port}{prefix}.
 server = "subscription.rhsm.redhat.com"
 port = 443
+# Required prefix starting with '/'.
 prefix = "/subscription"
