@@ -54,6 +54,10 @@ func generateReporterID() string {
 }
 
 func NewCandlepinClient(destConfig *config.DestinationConfig) (*CandlepinClient, error) {
+	if err := destConfig.ValidateDestination(); err != nil {
+		return nil, err
+	}
+
 	slog.Debug("initializing Candlepin client")
 
 	client, err := newHTTPClient(certPath, keyPath)

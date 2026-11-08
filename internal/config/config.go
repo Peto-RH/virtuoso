@@ -3,7 +3,10 @@ package config
 import (
 	"fmt"
 	"log/slog"
+	"net"
+	"net/url"
 	"os"
+	"strings"
 
 	"github.com/BurntSushi/toml"
 )
@@ -27,7 +30,7 @@ type DestinationConfig struct {
 	Prefix string
 }
 
-func LoadConfig(path string) (*Config, error) {
+func LoadConfig(path string, includeDestination bool) (*Config, error) {
 	slog.Debug("loading configuration", "path", path)
 
 	if path == "" {
@@ -40,12 +43,16 @@ func LoadConfig(path string) (*Config, error) {
 	}
 
 	var cfg Config
-	if err := toml.Unmarshal(data, &cfg); err != nil {
+	var target any = &cfg
+	if !includeDestination {
+		target = &struct{ Source *SourceConfig }{Source: &cfg.Source}
+	}
+	if err := toml.Unmarshal(data, target); err != nil {
 		return nil, fmt.Errorf("cannot parse config file: %w", err)
 	}
 
-	slog.Debug("validating configuration")
-	if err := validateConfig(&cfg); err != nil {
+	slog.Debug("validating source configuration")
+	if err := validateSourceConfig(&cfg.Source); err != nil {
 		return nil, err
 	}
 
@@ -53,13 +60,43 @@ func LoadConfig(path string) (*Config, error) {
 	return &cfg, nil
 }
 
-func validateConfig(cfg *Config) error {
-	if cfg.Source.Type == "" {
+func validateSourceConfig(cfg *SourceConfig) error {
+	if strings.TrimSpace(cfg.Type) == "" {
 		return fmt.Errorf("source.type is required")
 	}
-	if cfg.Source.URI == "" {
+	switch cfg.Type {
+	case "libvirt", "vmware":
+	default:
+		return fmt.Errorf("unsupported source.type %q: use libvirt or vmware", cfg.Type)
+	}
+	if strings.TrimSpace(cfg.URI) == "" {
 		return fmt.Errorf("source.uri is required")
 	}
 
+	return nil
+}
+
+// ValidateDestination is separate from loading because --print mode need no destination.
+func (cfg *DestinationConfig) ValidateDestination() error {
+	if strings.TrimSpace(cfg.OrgID) == "" {
+		return fmt.Errorf("destination.org_id is required")
+	}
+	if strings.TrimSpace(cfg.Server) == "" {
+		return fmt.Errorf("destination.server is required")
+	}
+	server, err := url.Parse("https://" + cfg.Server)
+	if err != nil || server.Host != cfg.Server || server.Hostname() == "" {
+		return fmt.Errorf("destination.server must be a hostname or IP address without a scheme, credentials, path, or port")
+	}
+	hostname := server.Hostname()
+	if cfg.Server != hostname && (cfg.Server != "["+hostname+"]" || net.ParseIP(hostname) == nil) {
+		return fmt.Errorf("destination.server must be a hostname or IP address without a scheme, credentials, path, or port")
+	}
+	if cfg.Port < 1 || cfg.Port > 65535 {
+		return fmt.Errorf("destination.port must be between 1 and 65535")
+	}
+	if !strings.HasPrefix(cfg.Prefix, "/") {
+		return fmt.Errorf("destination.prefix is required and must start with '/'")
+	}
 	return nil
 }
