@@ -55,6 +55,12 @@ func LoadConfig(path string, includeDestination bool) (*Config, error) {
 	if err := validateSourceConfig(&cfg.Source); err != nil {
 		return nil, err
 	}
+	if includeDestination {
+		slog.Debug("validating destination configuration")
+		if err := validateDestinationConfig(&cfg.Destination); err != nil {
+			return nil, err
+		}
+	}
 
 	slog.Debug("configuration loaded successfully")
 	return &cfg, nil
@@ -76,8 +82,7 @@ func validateSourceConfig(cfg *SourceConfig) error {
 	return nil
 }
 
-// ValidateDestination is separate from loading because --print mode need no destination.
-func (cfg *DestinationConfig) ValidateDestination() error {
+func validateDestinationConfig(cfg *DestinationConfig) error {
 	if strings.TrimSpace(cfg.OrgID) == "" {
 		return fmt.Errorf("destination.org_id is required")
 	}

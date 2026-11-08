@@ -66,10 +66,6 @@ func runAction(ctx context.Context, cmd *cli.Command) error {
 	if cmd.Bool("print") {
 		return candlepin.WriteHostGuestMapping(os.Stdout, hypervisors)
 	}
-	if len(hypervisors) == 0 {
-		slog.Info("no hypervisors collected, skipping reporting")
-		return nil
-	}
 
 	candlepinClient, err := candlepin.NewCandlepinClient(&cfg.Destination)
 	if err != nil {
@@ -83,6 +79,6 @@ func runAction(ctx context.Context, cmd *cli.Command) error {
 		return err
 	}
 
-	slog.Info("data sent successfully")
+	slog.Info("reporting completed successfully")
 	return nil
 }

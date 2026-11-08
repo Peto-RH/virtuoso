@@ -3,12 +3,14 @@ package candlepin
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
 	"reflect"
+	"strings"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -19,7 +21,7 @@ import (
 const (
 	testOrgID         = "test-org"
 	testCorrelationID = "test-correlation-id"
-	testReporterID    = "test-reporter-id"
+	testReporterID    = "test reporter+id&=?"
 )
 
 func TestCandlepinClientPing(t *testing.T) {
@@ -162,6 +164,168 @@ func TestCandlepinClientSend(t *testing.T) {
 	if jobRequestCount.Load() != 1 {
 		t.Errorf("Send() job request count = %d, want 1", jobRequestCount.Load())
 	}
+}
+
+func TestCandlepinClientSendHeartbeat(t *testing.T) {
+	tests := []struct {
+		name        string
+		hypervisors []report.Hypervisor
+		status      int
+		response    string
+		pollStatus  int
+		states      []string
+		wantError   string
+	}{
+		{name: "acceptance waits for completion", status: http.StatusAccepted, states: []string{"RUNNING", "FINISHED"}},
+		{name: "empty slice sends heartbeat", hypervisors: []report.Hypervisor{}, states: []string{"FINISHED"}},
+		{name: "failed job", states: []string{"FAILED"}, wantError: "job heartbeat-job: FAILED"},
+		{name: "invalid response", response: "invalid JSON", wantError: "cannot parse job response"},
+		{name: "missing job ID", response: `{}`, wantError: "job response is missing an id"},
+		{name: "blank job ID", response: `{"id":"  "}`, wantError: "job response is missing an id"},
+		{name: "server error", status: http.StatusServiceUnavailable, wantError: "HTTP 503"},
+		{name: "poll HTTP error", pollStatus: http.StatusForbidden, states: []string{"FINISHED"}, wantError: "heartbeat job polling failed: HTTP 403"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			var heartbeatCalls, pollCalls atomic.Int32
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				switch r.URL.Path {
+				case "/candlepin/hypervisors/test-org/heartbeat":
+					heartbeatCalls.Add(1)
+					assertRequest(t, r, http.MethodPut, r.URL.Path, url.Values{"reporter_id": {testReporterID}}, "")
+					body, err := io.ReadAll(r.Body)
+					if err != nil || len(body) != 0 {
+						t.Errorf("heartbeat body = %q, error = %v, want empty body", body, err)
+					}
+					if tt.status != 0 {
+						w.WriteHeader(tt.status)
+					}
+					response := tt.response
+					if response == "" {
+						response = `{"id":"heartbeat-job","state":"CREATED"}`
+					}
+					_, _ = io.WriteString(w, response)
+				case "/candlepin/jobs/heartbeat-job":
+					call := int(pollCalls.Add(1))
+					assertRequest(t, r, http.MethodGet, r.URL.Path, nil, "")
+					if call > len(tt.states) {
+						t.Error("unexpected extra job poll")
+						http.Error(w, "unexpected poll", http.StatusInternalServerError)
+						return
+					}
+					if tt.pollStatus != 0 {
+						w.WriteHeader(tt.pollStatus)
+					}
+					_, _ = fmt.Fprintf(w, `{"state":%q}`, tt.states[call-1])
+				default:
+					t.Errorf("unexpected request: %s %s", r.Method, r.URL)
+					http.NotFound(w, r)
+				}
+			}))
+			defer server.Close()
+			client := newTestCandlepinClient(server.Client(), server.URL+"/candlepin")
+			defer client.Close()
+			ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+			defer cancel()
+			err := client.Send(ctx, tt.hypervisors)
+			if tt.wantError == "" {
+				if err != nil {
+					t.Fatalf("Send() error = %v", err)
+				}
+			} else if err == nil || !strings.Contains(err.Error(), tt.wantError) {
+				t.Fatalf("Send() error = %v, want %q", err, tt.wantError)
+			}
+			if heartbeatCalls.Load() != 1 || int(pollCalls.Load()) != len(tt.states) {
+				t.Errorf("heartbeat/poll calls = %d/%d, want 1/%d", heartbeatCalls.Load(), pollCalls.Load(), len(tt.states))
+			}
+		})
+	}
+}
+
+func TestCandlepinClientHeartbeatCancellation(t *testing.T) {
+	for _, duringPoll := range []bool{false, true} {
+		t.Run(fmt.Sprintf("during poll=%t", duringPoll), func(t *testing.T) {
+			ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+			defer cancel()
+			var heartbeatCalls, pollCalls atomic.Int32
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				if r.Method == http.MethodPut {
+					heartbeatCalls.Add(1)
+					_, _ = io.WriteString(w, `{"id":"heartbeat-job"}`)
+					return
+				}
+				pollCalls.Add(1)
+				cancel()
+				// Bound the handler independently so lost context propagation fails instead of hanging.
+				select {
+				case <-r.Context().Done():
+				case <-time.After(5 * time.Second):
+					t.Error("poll request was not canceled")
+					_, _ = io.WriteString(w, `{"state":"FINISHED"}`)
+				}
+			}))
+			defer server.Close()
+			httpClient := server.Client()
+			httpClient.Timeout = 10 * time.Second
+			client := newTestCandlepinClient(httpClient, server.URL)
+			defer client.Close()
+			if !duringPoll {
+				cancel()
+			}
+			err := client.Heartbeat(ctx)
+			if !errors.Is(err, context.Canceled) {
+				t.Fatalf("Heartbeat() error = %v, want context cancellation", err)
+			}
+			wantCalls := int32(0)
+			if duringPoll {
+				wantCalls = 1
+			}
+			if heartbeatCalls.Load() != wantCalls || pollCalls.Load() != wantCalls {
+				t.Errorf("heartbeat/poll calls = %d/%d, want %d/%d", heartbeatCalls.Load(), pollCalls.Load(), wantCalls, wantCalls)
+			}
+		})
+	}
+}
+
+func TestWaitForJobCompletionContext(t *testing.T) {
+	for _, cancelDuringPoll := range []bool{false, true} {
+		t.Run(fmt.Sprintf("cancel during poll=%t", cancelDuringPoll), func(t *testing.T) {
+			t.Parallel()
+			ctx, cancel := context.WithTimeout(context.Background(), 2*jobPollTimeout)
+			defer cancel()
+			parentDeadline, _ := ctx.Deadline()
+			httpClient := &http.Client{Transport: roundTripFunc(func(req *http.Request) (*http.Response, error) {
+				deadline, ok := req.Context().Deadline()
+				if !ok || !deadline.Before(parentDeadline) || time.Until(deadline) > jobPollTimeout {
+					t.Errorf("poll request deadline = %v, want a polling deadline earlier than the caller's", deadline)
+				}
+				if cancelDuringPoll {
+					cancel()
+				}
+				return &http.Response{
+					StatusCode: http.StatusOK,
+					Body:       io.NopCloser(strings.NewReader(`{"state":"FINISHED"}`)),
+				}, nil
+			})}
+			client := newTestCandlepinClient(httpClient, "https://candlepin.example.test")
+			defer client.Close()
+			err := client.waitForJobCompletion(ctx, "job")
+			if cancelDuringPoll {
+				if !errors.Is(err, context.Canceled) {
+					t.Fatalf("waitForJobCompletion() error = %v, want cancellation instead of finished job", err)
+				}
+			} else if err != nil {
+				t.Fatalf("waitForJobCompletion() error = %v", err)
+			}
+		})
+	}
+}
+
+type roundTripFunc func(*http.Request) (*http.Response, error)
+
+func (f roundTripFunc) RoundTrip(req *http.Request) (*http.Response, error) {
+	return f(req)
 }
 
 func newTestCandlepinClient(httpClient *http.Client, baseURL string) *CandlepinClient {

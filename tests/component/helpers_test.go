@@ -84,3 +84,15 @@ func decodePrintedMapping(t *testing.T, stdout []byte) printedMapping {
 	}
 	return mapping
 }
+
+func addComponentDestinationConfig(t *testing.T, configPath string) {
+	t.Helper()
+	contents, err := os.ReadFile(configPath)
+	if err != nil {
+		t.Fatalf("read component config: %v", err)
+	}
+	contents = append(contents, "\n[destination]\norg_id = 'test-org'\nserver = '127.0.0.1'\nport = 443\nprefix = '/candlepin'\n"...)
+	if err := os.WriteFile(configPath, contents, 0o600); err != nil {
+		t.Fatalf("write component config: %v", err)
+	}
+}

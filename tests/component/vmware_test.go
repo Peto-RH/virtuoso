@@ -258,6 +258,39 @@ func TestComponentVMwareSkipsHostWithoutDNSHostname(t *testing.T) {
 	}
 }
 
+func TestComponentVMwarePrintsEmptyCollection(t *testing.T) {
+	model := newVMwareComponentModel(t, 1, 1, 0)
+	host := model.Map().Any("HostSystem").(*simulator.HostSystem)
+	host.Config.Network.DnsConfig = nil
+	configPath := setupVMwareComponent(t, model, simulatorPassword, withSimulatorCA)
+
+	stdout, stderr, err := runComponentBinary(t, configPath, "run", "--print")
+	if err != nil {
+		t.Fatalf("empty print mode required a destination: %v\nstdout:\n%s\nstderr:\n%s", err, stdout, stderr)
+	}
+	mapping := decodePrintedMapping(t, stdout)
+	if mapping.Hypervisors == nil || len(mapping.Hypervisors) != 0 {
+		t.Errorf("empty collection printed hypervisors = %+v, want an empty JSON array", mapping.Hypervisors)
+	}
+}
+
+func TestComponentVMwareCollectionFailureSkipsDestination(t *testing.T) {
+	model := newVMwareComponentModel(t, 1, 1, 0)
+	host := model.Map().Any("HostSystem").(*simulator.HostSystem)
+	// A listed guest that no longer exists makes property retrieval fail after login.
+	host.Vm = []types.ManagedObjectReference{{Type: "VirtualMachine", Value: "missing-vm"}}
+	configPath := setupVMwareComponent(t, model, simulatorPassword, withSimulatorCA)
+	addComponentDestinationConfig(t, configPath)
+
+	output := runFailingVMwareCommand(t, configPath, "run")
+	assertOutputContainsAll(t, output, "starting data collection", "data collection failed", "cannot retrieve VMware guests")
+	for _, unexpected := range []string{"initializing Candlepin client", "sending Candlepin heartbeat"} {
+		if strings.Contains(output, unexpected) {
+			t.Errorf("collection failure attempted destination reporting (%s):\n%s", unexpected, output)
+		}
+	}
+}
+
 func TestComponentVMwarePasswordCredentialErrors(t *testing.T) {
 	cases := []struct {
 		name           string
@@ -308,6 +341,7 @@ func TestComponentVMwarePasswordCredentialErrors(t *testing.T) {
 func TestComponentVMwareWrongPasswordWithTrailingSpace(t *testing.T) {
 	model := newVMwareComponentModel(t, 1, 1, 0)
 	configPath := setupVMwareComponent(t, model, simulatorPassword+" ", withSimulatorCA)
+	addComponentDestinationConfig(t, configPath)
 	for _, commandArgs := range [][]string{{"run", "--print"}, {"status"}} {
 		t.Run(strings.Join(commandArgs, " "), func(t *testing.T) {
 			output := runFailingVMwareCommand(t, configPath, commandArgs...)
@@ -332,6 +366,7 @@ func TestComponentVMwareUntrustedCertificate(t *testing.T) {
 func TestComponentVMwareStatusRejectsMissingCredential(t *testing.T) {
 	model := newVMwareComponentModel(t, 1, 1, 0)
 	configPath := setupVMwareComponent(t, model, simulatorPassword, withSimulatorCA)
+	addComponentDestinationConfig(t, configPath)
 	t.Setenv("CREDENTIALS_DIRECTORY", t.TempDir())
 	output := runFailingVMwareCommand(t, configPath, "status")
 	normalizedOutput := normalizeVMwareOutput(output, configPath)

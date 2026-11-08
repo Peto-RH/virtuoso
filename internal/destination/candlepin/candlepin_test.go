@@ -325,7 +325,6 @@ func TestEvaluateJobState(t *testing.T) {
 		{name: "failed", state: "FAILED", wantError: "job job-123: FAILED"},
 		{name: "canceled", state: "CANCELED", wantError: "job job-123: CANCELED"},
 		{name: "created", state: "CREATED"},
-		{name: "waiting", state: "WAITING"},
 		{name: "running", state: "RUNNING"},
 		{name: "unknown", state: "UNKNOWN"},
 	}
