@@ -2,6 +2,7 @@ package config
 
 import (
 	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -150,7 +151,7 @@ prefix = false
 	}
 }
 
-func TestDestinationConfigValidateDestination(t *testing.T) {
+func TestLoadConfigValidatesDestination(t *testing.T) {
 	tests := []struct {
 		name      string
 		change    func(*DestinationConfig)
@@ -187,22 +188,25 @@ func TestDestinationConfigValidateDestination(t *testing.T) {
 			if tt.change != nil {
 				tt.change(&cfg)
 			}
-			original := cfg
-			err := cfg.ValidateDestination()
+			contents := fmt.Sprintf("[source]\ntype = 'libvirt'\nuri = 'qemu:///system'\n[destination]\norg_id = %q\nserver = %q\nport = %d\nprefix = %q\n", cfg.OrgID, cfg.Server, cfg.Port, cfg.Prefix)
+			got, err := LoadConfig(writeConfig(t, contents), true)
 			if tt.wantError == "" {
 				if err != nil {
-					t.Fatalf("ValidateDestination() error = %v", err)
+					t.Fatalf("LoadConfig() error = %v", err)
+				}
+				if got.Destination != cfg {
+					t.Errorf("LoadConfig() destination = %+v, want %+v", got.Destination, cfg)
 				}
 			} else {
 				if err == nil || !strings.Contains(err.Error(), tt.wantError) {
-					t.Fatalf("ValidateDestination() error = %v, want %q", err, tt.wantError)
+					t.Fatalf("LoadConfig() error = %v, want %q", err, tt.wantError)
 				}
 				if strings.Contains(err.Error(), "server-secret") {
-					t.Error("ValidateDestination() exposed embedded credentials")
+					t.Error("LoadConfig() exposed embedded credentials")
 				}
-			}
-			if cfg != original {
-				t.Errorf("ValidateDestination() changed configuration to %+v, want %+v", cfg, original)
+				if got != nil {
+					t.Error("LoadConfig() returned a configuration on error")
+				}
 			}
 		})
 	}

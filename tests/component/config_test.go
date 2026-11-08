@@ -28,21 +28,6 @@ func TestComponentRejectsInvalidConfiguration(t *testing.T) {
 	}
 }
 
-func TestComponentRejectsInvalidDestination(t *testing.T) {
-	configPath := writeLibvirtComponentConfig(t, libvirtTestURI(t))
-	for _, command := range []string{"run", "status"} {
-		t.Run(command, func(t *testing.T) {
-			stdout, stderr, err := runComponentBinary(t, configPath, command)
-			if err == nil {
-				t.Fatalf("virtuoso %s accepted a missing destination\nstdout:\n%s\nstderr:\n%s", command, stdout, stderr)
-			}
-			if !strings.Contains(string(stdout)+string(stderr), "destination.org_id is required") {
-				t.Errorf("virtuoso did not report the missing destination\nstdout:\n%s\nstderr:\n%s", stdout, stderr)
-			}
-		})
-	}
-}
-
 func TestComponentRunPrintIgnoresDestinationFields(t *testing.T) {
 	configPath := writeLibvirtComponentConfig(t, libvirtTestURI(t))
 	contents, err := os.ReadFile(configPath)
@@ -77,14 +62,31 @@ func TestComponentRunPrintIgnoresDestinationFields(t *testing.T) {
 	}
 }
 
-func TestComponentStatusChecksSourceBeforeDestination(t *testing.T) {
+func TestComponentValidatesDestinationBeforeConnectingToSource(t *testing.T) {
 	missingFixture := filepath.Join(t.TempDir(), "missing-node.xml")
 	configPath := writeLibvirtComponentConfig(t, "test://"+filepath.ToSlash(missingFixture))
+	for _, command := range []string{"run", "status"} {
+		t.Run(command, func(t *testing.T) {
+			stdout, stderr, err := runComponentBinary(t, configPath, command)
+			if err == nil {
+				t.Fatalf("%s succeeded with a missing destination\nstdout:\n%s\nstderr:\n%s", command, stdout, stderr)
+			}
+			if !strings.Contains(string(stdout)+string(stderr), "destination.org_id is required") {
+				t.Errorf("%s did not validate the destination before connecting to the source\nstdout:\n%s\nstderr:\n%s", command, stdout, stderr)
+			}
+		})
+	}
+}
+
+func TestComponentStatusChecksSourceBeforeDestinationConnection(t *testing.T) {
+	missingFixture := filepath.Join(t.TempDir(), "missing-node.xml")
+	configPath := writeLibvirtComponentConfig(t, "test://"+filepath.ToSlash(missingFixture))
+	addComponentDestinationConfig(t, configPath)
 	stdout, stderr, err := runComponentBinary(t, configPath, "status")
 	if err == nil {
 		t.Fatalf("status succeeded with an unavailable source\nstdout:\n%s\nstderr:\n%s", stdout, stderr)
 	}
 	if !strings.Contains(string(stdout)+string(stderr), "source validation failed: cannot connect to libvirt") {
-		t.Errorf("status did not report the source failure before the missing destination\nstdout:\n%s\nstderr:\n%s", stdout, stderr)
+		t.Errorf("status did not report the source failure before connecting to the destination\nstdout:\n%s\nstderr:\n%s", stdout, stderr)
 	}
 }

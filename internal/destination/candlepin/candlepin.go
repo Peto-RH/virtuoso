@@ -8,6 +8,7 @@ import (
 	"io"
 	"log/slog"
 	"net/http"
+	"net/url"
 	"os"
 	"strings"
 	"time"
@@ -54,10 +55,6 @@ func generateReporterID() string {
 }
 
 func NewCandlepinClient(destConfig *config.DestinationConfig) (*CandlepinClient, error) {
-	if err := destConfig.ValidateDestination(); err != nil {
-		return nil, err
-	}
-
 	slog.Debug("initializing Candlepin client")
 
 	client, err := newHTTPClient(certPath, keyPath)
@@ -65,7 +62,7 @@ func NewCandlepinClient(destConfig *config.DestinationConfig) (*CandlepinClient,
 		return nil, err
 	}
 
-	baseURL := fmt.Sprintf("https://%s:%d%s", destConfig.Server, destConfig.Port, destConfig.Prefix)
+	baseURL := fmt.Sprintf("https://%s:%d%s", destConfig.Server, destConfig.Port, strings.TrimRight(destConfig.Prefix, "/"))
 	slog.Debug("Candlepin client base URL", "base_url", baseURL)
 	correlationID := uuid.New().String()
 	reporterID := generateReporterID()
@@ -87,6 +84,11 @@ func NewCandlepinClient(destConfig *config.DestinationConfig) (*CandlepinClient,
 }
 
 func (c *CandlepinClient) Send(ctx context.Context, hypervisors []report.Hypervisor) error {
+	if len(hypervisors) == 0 {
+		slog.Info("no hypervisors collected, sending heartbeat")
+		return c.Heartbeat(ctx)
+	}
+
 	slog.Debug("sending hypervisor data", "hosts", len(hypervisors))
 
 	requestBody := newHostGuestMappingRequest(hypervisors)
@@ -106,6 +108,27 @@ func (c *CandlepinClient) Send(ctx context.Context, hypervisors []report.Hypervi
 	return nil
 }
 
+func (c *CandlepinClient) Heartbeat(ctx context.Context) error {
+	slog.Debug("sending Candlepin heartbeat", "reporter_id", c.reporterID)
+	url := fmt.Sprintf("%s/hypervisors/%s/heartbeat?reporter_id=%s",
+		c.baseURL, url.PathEscape(c.orgID), url.QueryEscape(c.reporterID))
+	req, err := http.NewRequestWithContext(ctx, http.MethodPut, url, nil)
+	if err != nil {
+		return fmt.Errorf("cannot create heartbeat request: %w", err)
+	}
+	jobID, err := c.submitJob(req)
+	if err != nil {
+		return fmt.Errorf("failed to send heartbeat: %w", err)
+	}
+
+	slog.Debug("heartbeat submitted", "job_id", jobID)
+	// Acceptance only queues the heartbeat; timestamps are updated by the job.
+	if err := c.waitForJobCompletion(ctx, jobID); err != nil {
+		return fmt.Errorf("heartbeat job polling failed: %w", err)
+	}
+	return nil
+}
+
 func WriteHostGuestMapping(w io.Writer, hypervisors []report.Hypervisor) error {
 	encoder := json.NewEncoder(w)
 	encoder.SetIndent("", "  ")
@@ -118,7 +141,8 @@ func WriteHostGuestMapping(w io.Writer, hypervisors []report.Hypervisor) error {
 func (c *CandlepinClient) Ping(ctx context.Context) error {
 	slog.Debug("testing Candlepin connection and org access")
 
-	url := fmt.Sprintf("%s/hypervisors/%s/heartbeat?reporter_id=status_test", c.baseURL, c.orgID)
+	url := fmt.Sprintf("%s/hypervisors/%s/heartbeat?reporter_id=status_test",
+		c.baseURL, url.PathEscape(c.orgID))
 	req, err := http.NewRequestWithContext(ctx, "PUT", url, nil)
 	if err != nil {
 		return err
@@ -153,7 +177,8 @@ func (c *CandlepinClient) Close() error {
 }
 
 func (c *CandlepinClient) reportHostGuestMapping(ctx context.Context, data hostGuestMappingRequest) (string, error) {
-	url := fmt.Sprintf("%s/hypervisors/%s?reporter_id=%s", c.baseURL, c.orgID, c.reporterID)
+	url := fmt.Sprintf("%s/hypervisors/%s?reporter_id=%s",
+		c.baseURL, url.PathEscape(c.orgID), url.QueryEscape(c.reporterID))
 
 	body, err := json.Marshal(data)
 	if err != nil {
@@ -165,8 +190,12 @@ func (c *CandlepinClient) reportHostGuestMapping(ctx context.Context, data hostG
 		return "", err
 	}
 
-	c.setHeaders(req)
 	req.Header.Set("Content-Type", "text/plain")
+	return c.submitJob(req)
+}
+
+func (c *CandlepinClient) submitJob(req *http.Request) (string, error) {
+	c.setHeaders(req)
 
 	resp, err := c.httpClient.Do(req)
 	if err != nil {
@@ -182,24 +211,27 @@ func (c *CandlepinClient) reportHostGuestMapping(ctx context.Context, data hostG
 	if err := json.NewDecoder(resp.Body).Decode(&job); err != nil {
 		return "", fmt.Errorf("cannot parse job response: %w", err)
 	}
+	if strings.TrimSpace(job.ID) == "" {
+		return "", fmt.Errorf("job response is missing an id")
+	}
 
 	return job.ID, nil
 }
 
 func (c *CandlepinClient) waitForJobCompletion(ctx context.Context, jobID string) error {
-	url := fmt.Sprintf("%s/jobs/%s", c.baseURL, jobID)
+	ctx, cancel := context.WithTimeoutCause(ctx, jobPollTimeout,
+		fmt.Errorf("job polling timeout after %v: %w", jobPollTimeout, context.DeadlineExceeded))
+	defer cancel()
+
+	url := fmt.Sprintf("%s/jobs/%s", c.baseURL, url.PathEscape(jobID))
 
 	timer := time.NewTimer(500 * time.Millisecond)
 	defer timer.Stop()
 
-	timeout := time.After(jobPollTimeout)
-
 	for {
 		select {
 		case <-ctx.Done():
-			return ctx.Err()
-		case <-timeout:
-			return fmt.Errorf("job polling timeout after %v", jobPollTimeout)
+			return context.Cause(ctx)
 		case <-timer.C:
 			timer.Reset(jobPollInterval)
 			req, err := http.NewRequestWithContext(ctx, "GET", url, nil)
@@ -210,13 +242,23 @@ func (c *CandlepinClient) waitForJobCompletion(ctx context.Context, jobID string
 
 			resp, err := c.httpClient.Do(req)
 			if err != nil {
+				if ctx.Err() != nil {
+					return context.Cause(ctx)
+				}
 				slog.Debug("job poll request failed, retrying", "err", err)
 				continue
 			}
 
+			if err := c.handleHTTPError(resp); err != nil {
+				resp.Body.Close()
+				return err
+			}
 			var job jobResponse
 			err = json.NewDecoder(resp.Body).Decode(&job)
 			resp.Body.Close()
+			if ctx.Err() != nil {
+				return context.Cause(ctx)
+			}
 
 			if err != nil {
 				slog.Debug("cannot parse job response, retrying", "err", err)
@@ -242,7 +284,7 @@ func evaluateJobState(jobID, state string) (bool, error) {
 		return true, nil
 	case "FAILED", "CANCELED":
 		return false, fmt.Errorf("job %s: %s", jobID, state)
-	case "CREATED", "WAITING", "RUNNING":
+	case "CREATED", "RUNNING":
 		return false, nil
 	default:
 		slog.Warn("unknown job state", "state", state)
