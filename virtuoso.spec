@@ -13,7 +13,6 @@ BuildRequires:  make
 BuildRequires:  systemd-rpm-macros
 
 Requires:       subscription-manager
-Requires:       group(libvirt)
 Requires:       group(rhsm)
 
 %description

@@ -25,7 +25,7 @@ ExecStart=/usr/bin/virtuoso run
 # User context
 User=virtuoso
 Group=virtuoso
-SupplementaryGroups=libvirt rhsm
+SupplementaryGroups=rhsm
 LoadCredentialEncrypted=virtuoso.vmware.password
 
 # Basic hardening

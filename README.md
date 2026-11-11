@@ -36,8 +36,10 @@ type = "libvirt"
 uri = "qemu:///system"
 ```
 
-The packaged service runs as `virtuoso`, with the `libvirt` and `rhsm`
-supplementary groups. Ensure libvirt is available at the configured URI.
+The packaged service runs as `virtuoso` with the `rhsm` supplementary group.
+The adapter opens a read-only libvirt connection, which needs no group
+membership under libvirt's default authorization. Ensure libvirt is available
+at the configured URI.
 When running the binary directly for debugging, it uses your current user,
 which must also have permission to access libvirt.
 No VMware password is needed.

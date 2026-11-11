@@ -16,7 +16,7 @@ type LibvirtProvider struct {
 func NewLibvirtProvider(ctx context.Context, uri string) (*LibvirtProvider, error) {
 	slog.Debug("connecting to libvirt", "uri", uri)
 
-	conn, err := libvirt.NewConnect(uri)
+	conn, err := libvirt.NewConnectReadOnly(uri)
 	if err != nil {
 		return nil, fmt.Errorf("cannot connect to libvirt: %w", err)
 	}
