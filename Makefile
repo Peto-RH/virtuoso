@@ -1,11 +1,13 @@
 OUTPUT_DIR=bin
 RPMBUILD_DIR=$(CURDIR)/rpmbuild
-VERSION := $(shell rpmspec virtuoso.spec --query --srpm --queryformat '%{version}')
+# Spec queries expand the sysusers definition before RPM sources are staged.
+VERSION := $(shell rpmspec --define "_sourcedir $(CURDIR)/data/sysusers.d" virtuoso.spec --query --srpm --queryformat '%{version}')
 
 BUILDROOT ?=
 BINDIR ?= /usr/bin
 UNITDIR ?= /usr/lib/systemd/system
 SYSUSERSDIR ?= /usr/lib/sysusers.d
+SYSUSERSFILE ?= data/sysusers.d/virtuoso.conf
 SYSCONFDIR ?= /etc
 
 .PHONY: build
@@ -22,7 +24,7 @@ install_files:
 	install -D -m 0755 bin/virtuoso "$(BUILDROOT)$(BINDIR)/virtuoso"
 	install -D -m 0644 data/systemd/virtuoso.service "$(BUILDROOT)$(UNITDIR)/virtuoso.service"
 	install -D -m 0644 data/systemd/virtuoso.timer "$(BUILDROOT)$(UNITDIR)/virtuoso.timer"
-	install -D -m 0644 data/sysusers.d/virtuoso.conf "$(BUILDROOT)$(SYSUSERSDIR)/virtuoso.conf"
+	install -D -m 0644 "$(SYSUSERSFILE)" "$(BUILDROOT)$(SYSUSERSDIR)/virtuoso.conf"
 	install -d -m 0750 "$(BUILDROOT)$(SYSCONFDIR)/virtuoso"
 	install -D -m 0640 config/virtuoso.toml "$(BUILDROOT)$(SYSCONFDIR)/virtuoso/virtuoso.toml"
 
@@ -34,6 +36,8 @@ source-tarball:
 		--prefix="virtuoso-$(VERSION)/" \
 		--output="$(RPMBUILD_DIR)/SOURCES/virtuoso-$(VERSION).tar.gz" \
 		HEAD
+	git -c safe.directory="$(CURDIR)" show HEAD:data/sysusers.d/virtuoso.conf \
+		> "$(RPMBUILD_DIR)/SOURCES/virtuoso.conf"
 
 .PHONY: rpm
 rpm: source-tarball

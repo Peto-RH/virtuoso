@@ -8,7 +8,10 @@ on:
 jobs:
   build:
     runs-on: ubuntu-latest
-    container: fedora:latest
+    strategy:
+      matrix:
+        image: [fedora:latest, quay.io/centos/centos:stream10]
+    container: ${{ matrix.image }}
 
     steps:
       - name: Install git
@@ -23,7 +26,11 @@ jobs:
         run: |
           dnf install -y rpm-build  # for rpmbuild command
           dnf install -y dnf-plugins-core  # for builddep command
-          dnf builddep -y virtuoso.spec
+          dnf install -y util-linux  # for runuser command
+          if [ -f /etc/centos-release ]; then
+            dnf config-manager --set-enabled crb
+          fi
+          dnf builddep -y --define "_sourcedir $GITHUB_WORKSPACE/data/sysusers.d" virtuoso.spec
 
       - name: Run package tests
         run: make test
@@ -36,6 +43,12 @@ jobs:
 
       - name: Install RPM
         run: rpm -ivh --nodeps --nosignature rpmbuild/RPMS/*/*.rpm
+
+      - name: Check configuration access
+        run: |
+          test "$(stat -c '%U:%G:%a' /etc/virtuoso)" = "root:virtuoso:750"
+          test "$(stat -c '%U:%G:%a' /etc/virtuoso/virtuoso.toml)" = "root:virtuoso:640"
+          runuser -u virtuoso -- test -r /etc/virtuoso/virtuoso.toml
 
       - name: Smoke test
         run: virtuoso --version

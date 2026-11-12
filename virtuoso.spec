@@ -1,11 +1,12 @@
 Name:           virtuoso
 Version:        0.1.0
-Release:        1%{?dist}
+Release:        2%{?dist}
 Summary:        Virtual machine data collector for subscription management
 
 License:        GPL-2.0-or-later
 URL:            https://github.com/Peto-RH/virtuoso
 Source0:        %{name}-%{version}.tar.gz
+Source1:        %{name}.conf
 
 BuildRequires:  golang >= 1.23
 BuildRequires:  libvirt-devel
@@ -14,6 +15,7 @@ BuildRequires:  systemd-rpm-macros
 
 Requires:       subscription-manager
 Requires:       group(rhsm)
+Requires(pre):  /usr/bin/systemd-sysusers
 
 %description
 Virtuoso collects virtual machine host-to-guest associations from hypervisor
@@ -31,7 +33,12 @@ environments and reports them to Red Hat subscription management platforms.
     BINDIR=%{_bindir} \
     UNITDIR=%{_unitdir} \
     SYSUSERSDIR=%{_sysusersdir} \
+    SYSUSERSFILE=%{SOURCE1} \
     SYSCONFDIR=%{_sysconfdir}
+
+%pre
+# The configuration group must exist before RPM applies file ownership.
+%sysusers_create_package %{name} %{SOURCE1}
 
 %post
 %systemd_post %{name}.timer
